@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#173c35"><title>Documentación técnica · FastWebMCP para WordPress</title><meta name="description" content="Referencia técnica de FastWebMCP para WordPress: API JavaScript y PHP, REST, permisos, esquemas, ciclo de vida, integración en bloques y compilación."><link rel="canonical" href="https://mauricioperera.github.io/fastwebmcp-wordpress/desarrolladores.html"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="documentation.css"><script src="documentation.js" defer></script></head><body class="documentation"><a class="skip" href="#referencia">Saltar a la documentación</a><header class="header wrap"><a class="brand" href="./"><span class="brand-symbol" aria-hidden="true">↗</span><span>FastWebMCP<small>para WordPress</small></span></a><nav aria-label="Navegación principal"><a href="./">El plugin</a><a href="./#instalar">Instalar</a><a href="desarrolladores.html" aria-current="page">Documentación</a><a class="nav-repo" href="https://github.com/MauricioPerera/fastwebmcp-wordpress">GitHub ↗</a></nav></header><div class="doc-hero wrap"><p class="eyebrow">REFERENCIA PARA DESARROLLADORES · 0.6.0</p><h1>Construye sobre<br>las herramientas de tu sitio.</h1><p>API, ejemplos y decisiones de implementación para integrar WebMCP en themes, bloques y plugins de WordPress.</p><div class="doc-meta"><span>JavaScript + PHP</span><span>REST · Zod · AbortSignal</span><a href="https://github.com/MauricioPerera/fastwebmcp-wordpress">Ver el código fuente ↗</a></div></div><div class="doc-layout wrap"><aside class="doc-sidebar"><details open><summary>En esta página</summary><nav aria-label="Índice de la documentación"><a href="#arquitectura">Arquitectura y alcance</a><a href="#inicio">Integración mínima en un theme</a><a href="#javascript">Referencia JavaScript</a><a href="#ciclo">Ciclo de vida y cancelación</a><a href="#php">Operaciones PHP extensibles</a><a href="#rest">REST, sesión y caché</a><a href="#seguridad">Permisos, saneamiento y escrituras</a><a href="#esquemas">Subconjunto de JSON Schema</a><a href="#bloques">Bloques, herramientas y flujos incluidos</a><a href="#errores">Eventos, diagnóstico y errores</a><a href="#desarrollo">Compilación, pruebas y distribución</a><a href="#limites">Límites y referencias</a></nav></details><a class="doc-back" href="./">← Volver a la landing</a></aside><main id="referencia" class="doc-content"><section id="arquitectura" aria-labelledby="arquitectura-title"><p class="doc-section-number">01</p><h2 id="arquitectura-title">Arquitectura y alcance</h2><p>Esta referencia describe la implementación <strong>0.6.0</strong>. El frontend publica herramientas en el navegador a través de FastWebMCP; las operaciones PHP se ejecutan mediante REST de WordPress. Exponer una ruta REST por sí solo no registra una herramienta WebMCP.</p><ol class="architecture"><li><strong>Theme o bloque</strong><span>Markup, controles y estado visible.</span></li><li><strong>Runtime compartido</strong><span>window.FastWebMCP · Zod · registro nativo · ciclo de vida.</span></li><li><strong>WordPress REST</strong><span>Sesión · esquema · saneamiento · permisos · callback PHP.</span></li></ol><p><code>runtime.ts</code> contiene la API; <code>frontend.ts</code>, los adaptadores de búsqueda y filtros; <code>frontend-api.php</code>, el registro de operaciones y las rutas. Los bundles administrativos se cargan en sus pantallas correspondientes. El frontend no necesita el panel técnico.</p><p>Requisitos del plugin: WordPress 6.5+, PHP 8.0+. Para ejecutar herramientas desde un agente se necesita un navegador con WebMCP nativo y un agente capaz de invocarlas. El runtime utiliza MutationObserver, AbortController y AbortSignal.any; no incorpora un polyfill de WebMCP ni un cliente de IA.</p><p class="source-note">Implementación: <a href="https://github.com/MauricioPerera/fastwebmcp-wordpress/blob/main/runtime.ts">runtime.ts</a>, <a href="https://github.com/MauricioPerera/fastwebmcp-wordpress/blob/main/frontend-api.php">frontend-api.php</a>. La API nativa se describe en la <a href="https://webmachinelearning.github.io/webmcp/">especificación WebMCP</a>.</p></section><section id="inicio" aria-labelledby="inicio-title"><p class="doc-section-number">02</p><h2 id="inicio-title">Integración mínima en un theme</h2><p>Con el plugin activo, carga tu extensión después de <code>fwmcp-runtime</code>. Este ejemplo añade un shortcode de contador. La herramienta y el botón comparten la misma función, y cada instancia mantiene su estado.</p><div class="code-sample"><div class="code-heading"><span>functions.php del theme hijo</span><span>PHP</span></div><pre><code>&lt;?php
+add_action(&#x27;wp_enqueue_scripts&#x27;, function () {
+    if (!function_exists(&#x27;fwmcp_enqueue_frontend&#x27;)) {
+        return;
+    }
+    fwmcp_enqueue_frontend();
+    wp_enqueue_script(
+        &#x27;mytheme-webmcp&#x27;,
+        get_stylesheet_directory_uri() . &#x27;/webmcp.js&#x27;,
+        array(&#x27;fwmcp-runtime&#x27;),
+        &#x27;1.0.0&#x27;,
+        true
+    );
+});
+
+add_shortcode(&#x27;webmcp_counter&#x27;, function () {
+    return &#x27;&lt;section data-fwmcp-component=&quot;counter&quot;&gt;
+        &lt;button type=&quot;button&quot;&gt;Sumar&lt;/button&gt;
+        &lt;output aria-live=&quot;polite&quot;&gt;0&lt;/output&gt;
+        &lt;p data-status role=&quot;status&quot;&gt;&lt;/p&gt;
+    &lt;/section&gt;&#x27;;
+});</code></pre></div><div class="code-sample"><div class="code-heading"><span>webmcp.js del theme hijo</span><span>JavaScript</span></div><pre><code>function setupCounter(api) {
+  api.registerComponent(
+    &#x27;counter&#x27;,
+    &#x27;[data-fwmcp-component=&quot;counter&quot;]&#x27;,
+    ({ id, root, signal, registerTool }) =&gt; {
+      const output = root.querySelector(&#x27;output&#x27;);
+      const status = root.querySelector(&#x27;[data-status]&#x27;);
+      let count = 0;
+
+      function increment() {
+        output.textContent = String(++count);
+        status.textContent = &#x27;Contador actualizado.&#x27;;
+        return { id, count };
+      }
+
+      root.querySelector(&#x27;button&#x27;).addEventListener(
+        &#x27;click&#x27;, increment, { signal }
+      );
+
+      void registerTool({
+        name: &#x27;increment&#x27;,
+        description: &#x27;Increment this visible counter by one.&#x27;,
+        inputSchema: api.z.object({}).strict(),
+        execute: increment
+      }).catch(error =&gt; {
+        status.textContent = error.message;
+      });
+
+      return () =&gt; { /* limpiar recursos adicionales */ };
+    }
+  );
+}
+
+if (window.FastWebMCP) {
+  setupCounter(window.FastWebMCP);
+} else {
+  document.addEventListener(&#x27;fastwebmcp:ready&#x27;, event =&gt; {
+    setupCounter(event.detail);
+  }, { once: true });
+}</code></pre></div><p>Coloca <code>[webmcp_counter]</code> en un bloque Shortcode. Prueba dos instancias: sus herramientas reciben nombres como <code>counter_5_increment</code> y <code>counter_6_increment</code>. Los números son ilustrativos; descúbrelos en cada página.</p><div class="doc-note"><strong>Registro síncrono del adaptador.</strong><p>El callback de montaje de <code>registerComponent</code> debe ser síncrono. Puede iniciar registros asíncronos y devolver una función de limpieza. Sin WebMCP, el runtime aún monta el componente y su botón manual.</p></div></section><section id="javascript" aria-labelledby="javascript-title"><p class="doc-section-number">03</p><h2 id="javascript-title">Referencia JavaScript</h2><div class="table-scroll" tabindex="0" role="region" aria-label="Métodos públicos JavaScript"><table><thead><tr><th scope="col">Método / propiedad</th><th scope="col">Entrada y resultado</th><th scope="col">Uso</th></tr></thead><tbody><tr><td><code>registerTool(spec, options?)</code></td><td><code>Promise&lt;boolean&gt;</code></td><td>true confirma registro nativo; false indica registro desactivado/no disponible o una señal ya cancelada. Los errores rechazan la Promise.</td></tr><tr><td><code>registerComponent(type, selector, mount)</code></td><td>Devuelve <code>dispose()</code></td><td>Asigna prefijo y señal por instancia. dispose retira el adaptador y sus instancias.</td></tr><tr><td><code>invokeServer(name, input, options?)</code></td><td><code>Promise&lt;JSON&gt;</code></td><td>Llama a una operación PHP con validación REST y sesión. No registra herramientas.</td></tr><tr><td><code>registerServerTool(name, options?)</code></td><td><code>Promise&lt;boolean&gt;</code></td><td>Descubre el descriptor y registra una herramienta global server_NAME.</td></tr><tr><td><code>schemaFromJSON(schema)</code></td><td>Devuelve un esquema Zod</td><td>Convierte el subconjunto documentado; rechaza restricciones desconocidas.</td></tr><tr><td><code>components()</code></td><td><code>Array&lt;{id, type}&gt;</code></td><td>Lista las instancias que conoce el runtime. No es un inventario de todas las herramientas del navegador.</td></tr><tr><td><code>reconcile()</code></td><td>Sin resultado de negocio</td><td>Revisa raíces actuales y adaptadores; útil cuando cambian atributos fuera de la observación automática.</td></tr><tr><td><code>supported()</code></td><td><code>boolean</code></td><td>Comprueba la configuración y la presencia de document.modelContext. No certifica la conexión del agente.</td></tr><tr><td><code>z</code> / <code>version</code></td><td>Zod compartido / <code>"0.6.0"</code></td><td>Evita importar un segundo Zod para tus herramientas.</td></tr></tbody></table></div><div class="code-sample"><div class="code-heading"><span>Contrato de una herramienta</span><span>TypeScript</span></div><pre><code>type ToolSpec = {
+  name: string;
+  description: string;
+  inputSchema: ZodType;
+  readOnly?: boolean;
+  execute: (
+    input: any,
+    context: { signal: AbortSignal }
+  ) =&gt; unknown | Promise&lt;unknown&gt;;
+};
+
+// registerTool: options = { signal?: AbortSignal }
+// registerServerTool: options = {
+//   signal?: AbortSignal,
+//   onResult?: (result: any) =&gt; unknown
+// }
+// invokeServer: options = { signal?: AbortSignal }</code></pre></div><p>Usa esquemas Zod convertibles a JSON Schema: el SDK llama a <code>toJSONSchema()</code> antes del registro y a <code>parse()</code> antes de ejecutar. Un esquema Zod aceptado por JavaScript puede fallar al convertirse, por ejemplo si incluye transformaciones no representables. <code>readOnly</code> se convierte en una anotación, no en un permiso.</p><p>Herramientas JS: <code>^[a-z][a-z0-9_]{0,99}$</code>. Tipos de componente: <code>^[a-z][a-z0-9_]{0,29}$</code>. El nombre final con prefijo también debe caber en 100 caracteres. Nombres duplicados se rechazan; no registres un mismo puente global dentro de cada instancia.</p></section><section id="ciclo" aria-labelledby="ciclo-title"><p class="doc-section-number">04</p><h2 id="ciclo-title">Ciclo de vida y cancelación</h2><p>El callback de montaje recibe <code>{ id, root, signal, registerTool }</code>. Busca controles dentro de <code>root</code>, no mediante IDs globales. Usa <code>{signal}</code> en listeners y propaga la señal a peticiones y tareas largas.</p><ul><li>El runtime observa inserciones, retiradas y cambios de <code>data-fwmcp-component</code>.</li><li>Al reconciliar una raíz retirada, cancela sus herramientas y ejecuta su función de limpieza.</li><li>Si después se reinserta, se monta como una instancia nueva. Retirar y reinsertar en el mismo turno sin una reconciliación intermedia puede conservar la instancia.</li><li>Una raíz pertenece a un adaptador. Para sustituir controles internos, reemplaza la raíz completa.</li><li>Otros cambios de atributos usados en tu selector requieren <code>api.reconcile()</code>.</li><li>Un error de montaje se registra en consola; no se reintenta mientras la raíz siga montada. Retírala y reconcilia antes de volver a insertarla.</li></ul><div class="code-sample"><div class="code-heading"><span>Herramienta global con vida explícita</span><span>JavaScript</span></div><pre><code>const api = window.FastWebMCP;
+const lifetime = new AbortController();
+
+const registered = await api.registerTool({
+  name: &#x27;mytheme_component_count&#x27;,
+  description: &#x27;Read the number of mounted frontend components.&#x27;,
+  inputSchema: api.z.object({}).strict(),
+  readOnly: true,
+  execute: () =&gt; ({ count: api.components().length })
+}, { signal: lifetime.signal });
+
+// Al desmontar tu integración:
+lifetime.abort();</code></pre></div><p>Este fragmento usa <code>await</code> de nivel superior: ejecútalo en un módulo o una función async después de que la API esté disponible. Sin una señal, la herramienta global permanece durante la vida de la página. La señal del executor combina la cancelación de la llamada con la de su registro; no cancela mágicamente trabajo que ignore esa señal.</p></section><section id="php" aria-labelledby="php-title"><p class="doc-section-number">05</p><h2 id="php-title">Operaciones PHP extensibles</h2><p>Registra en <code>init</code>, antes de <code>rest_api_init</code>. Usa un nombre único y un esquema raíz de tipo object con <code>additionalProperties:false</code>. Este ejemplo público solo devuelve una etiqueta saneada; no modifica WordPress.</p><div class="code-sample"><div class="code-heading"><span>Registrar una operación pública</span><span>PHP</span></div><pre><code>&lt;?php
+add_action(&#x27;init&#x27;, function () {
+    if (!function_exists(&#x27;fwmcp_register_frontend_tool&#x27;)) {
+        return;
+    }
+    fwmcp_register_frontend_tool(&#x27;theme_echo&#x27;, array(
+        &#x27;description&#x27; =&gt; &#x27;Echo a short label in the visible theme.&#x27;,
+        &#x27;public&#x27; =&gt; true,
+        &#x27;readOnly&#x27; =&gt; true,
+        &#x27;schema&#x27; =&gt; array(
+            &#x27;type&#x27; =&gt; &#x27;object&#x27;,
+            &#x27;additionalProperties&#x27; =&gt; false,
+            &#x27;properties&#x27; =&gt; array(
+                &#x27;label&#x27; =&gt; array(&#x27;type&#x27; =&gt; &#x27;string&#x27;, &#x27;maxLength&#x27; =&gt; 80)
+            ),
+            &#x27;required&#x27; =&gt; array(&#x27;label&#x27;)
+        ),
+        &#x27;permission_callback&#x27; =&gt; &#x27;__return_true&#x27;,
+        &#x27;callback&#x27; =&gt; function ($input, $request) {
+            return array(&#x27;label&#x27; =&gt; sanitize_text_field($input[&#x27;label&#x27;]));
+        }
+    ));
+});</code></pre></div><div class="code-sample"><div class="code-heading"><span>Mostrar el resultado en el theme</span><span>HTML + JavaScript</span></div><pre><code>&lt;!-- En el markup del theme --&gt;
+&lt;p id=&quot;theme-status&quot; role=&quot;status&quot;&gt;&lt;/p&gt;
+
+&lt;!-- En tu script de extensión, después de que exista la API --&gt;
+&lt;script&gt;
+async function setupEcho(api) {
+  const lifetime = new AbortController();
+  const output = document.querySelector(&#x27;#theme-status&#x27;);
+  if (!output) return;
+
+  try {
+    await api.registerServerTool(&#x27;theme_echo&#x27;, {
+      signal: lifetime.signal,
+      onResult: result =&gt; { output.textContent = result.label; }
+    });
+  } catch (error) {
+    output.textContent = error.message;
+  }
+  // En una integración dinámica, guarda lifetime para llamar abort()
+  // cuando retires este widget. En navegación completa termina la página.
+}
+
+if (window.FastWebMCP) {
+  void setupEcho(window.FastWebMCP);
+} else {
+  document.addEventListener(&#x27;fastwebmcp:ready&#x27;, event =&gt; {
+    void setupEcho(event.detail);
+  }, { once: true });
+}
+&lt;/script&gt;</code></pre></div><div class="table-scroll" tabindex="0" role="region" aria-label="Campos del registro PHP"><table><thead><tr><th scope="col">Campo</th><th scope="col">Obligatorio / valor inicial</th><th scope="col">Contrato</th></tr></thead><tbody><tr><td><code>description</code></td><td>Obligatorio</td><td>String no vacío; describe entradas, efecto y alcance.</td></tr><tr><td><code>schema</code></td><td>Obligatorio</td><td>Array PHP con JSON Schema raíz estricto.</td></tr><tr><td><code>callback</code></td><td>Obligatorio</td><td>Callable: recibe ($input, $request); devuelve datos, WP_Error o respuesta REST.</td></tr><tr><td><code>permission_callback</code></td><td>Obligatorio</td><td>Callable con WP_REST_Request; devuelve bool o WP_Error.</td></tr><tr><td><code>public</code></td><td>false</td><td>Cuando es false se exige sesión. true no anula capability ni permission_callback.</td></tr><tr><td><code>capability</code></td><td>String vacío</td><td>Capacidad adicional comprobada con current_user_can.</td></tr><tr><td><code>readOnly</code></td><td>false</td><td>Anotación publicada para el agente; no restringe el callback.</td></tr></tbody></table></div><p>Nombres PHP: <code>^[a-z][a-z0-9_.-]{0,59}$</code>. El puente genera <code>server_NAME</code> y sustituye puntos/guiones por guiones bajos: <code>theme.echo</code> y <code>theme_echo</code> colisionan. Registrar demasiado tarde lanza LogicException; especificaciones o nombres inválidos/duplicados lanzan InvalidArgumentException.</p></section><section id="rest" aria-labelledby="rest-title"><p class="doc-section-number">06</p><h2 id="rest-title">REST, sesión y caché</h2><div class="table-scroll" tabindex="0" role="region" aria-label="Rutas frontend y sesión"><table><thead><tr><th scope="col">Petición</th><th scope="col">Contrato</th><th scope="col">Resultado</th></tr></thead><tbody><tr><td><code>GET /wp-json/fastwebmcp/v1/frontend-tools</code></td><td>Descubre operaciones para la sesión</td><td><code>{version:1, tools:[{name,description,inputSchema,readOnly}]}</code></td></tr><tr><td><code>POST /wp-json/fastwebmcp/v1/frontend-tools/NAME</code></td><td>Body: <code>{"input":{...}}</code></td><td>Datos devueltos por el callback; no añade un wrapper success.</td></tr><tr><td><code>GET /wp-admin/admin-ajax.php?action=fwmcp_frontend_session</code></td><td>Bootstrap de sesión same-origin sin caché</td><td><code>{success:true,data:{nonce,authenticated}}</code>; nonce vacío si no hay sesión.</td></tr></tbody></table></div><p>Las URLs REST de la tabla muestran el formato habitual con enlaces permanentes. Usa <code>rest_url()</code> o <code>invokeServer()</code> en integraciones para respetar la configuración real, subdirectorios y formato de rutas. WordPress también admite el parámetro <code>rest_route</code> cuando no usa ese formato. <a href="https://developer.wordpress.org/rest-api/extending-the-rest-api/adding-custom-endpoints/">Referencia de rutas WordPress</a>.</p><div class="code-sample"><div class="code-heading"><span>Usar una operación desde la interfaz manual</span><span>JavaScript</span></div><pre><code>const result = await window.FastWebMCP.invokeServer(&#x27;filter_content&#x27;, {
+  query: &#x27;diseño&#x27;,
+  type: &#x27;post&#x27;,
+  category: 0,
+  limit: 6
+});
+// result = { query, category, type, results: [{ id, title, url }] }</code></pre></div><div class="code-sample"><div class="code-heading"><span>Petición pública de diagnóstico</span><span>Shell</span></div><pre><code>curl -X POST &#x27;https://example.com/wp-json/fastwebmcp/v1/frontend-tools/filter_content&#x27; \
+  -H &#x27;Content-Type: application/json&#x27; \
+  --data &#x27;{&quot;input&quot;:{&quot;query&quot;:&quot;diseño&quot;,&quot;type&quot;:&quot;post&quot;,&quot;category&quot;:0,&quot;limit&quot;:6}}&#x27;</code></pre></div><p>Reemplaza example.com por un WordPress con el plugin activo. La petición curl verifica REST; no demuestra registro ni ejecución nativa WebMCP.</p><h3>Autenticación del runtime</h3><p>Obtiene el nonce mediante Ajax con cookies same-origin y lo envía como <code>X-WP-Nonce</code>. Los scripts frontend no incrustan un nonce de usuario en HTML cacheable. La sesión se mantiene en memoria durante la página. Ante <code>rest_cookie_invalid_nonce</code>, la llamada falla y se invalida ese bootstrap; la siguiente llamada pide una sesión nueva. No hay reintento automático de escrituras.</p><p>Respeta respuestas sin caché en el CDN para la sesión y el manifiesto, y evita cachear operaciones autenticadas. Si cambias de cuenta sin recargar la página, redescubre tras recargar para renovar sesión, permisos y herramientas.</p></section><section id="seguridad" aria-labelledby="seguridad-title"><p class="doc-section-number">07</p><h2 id="seguridad-title">Permisos, saneamiento y escrituras</h2><p>El manifiesto filtra por sesión y <code>capability</code>. La comprobación específica de <code>permission_callback</code> ocurre al ejecutar: una operación descubierta puede seguir rechazando una entrada. El plugin usa validación/saneamiento de esquema de WordPress para el argumento <code>input</code>, además de la comprobación de permisos.</p><div class="code-sample"><div class="code-heading"><span>Permiso de edición por objeto</span><span>PHP</span></div><pre><code>// Dentro del spec de una operación privada con schema post_id:
+&#x27;public&#x27; =&gt; false,
+&#x27;capability&#x27; =&gt; &#x27;edit_posts&#x27;,
+&#x27;permission_callback&#x27; =&gt; function ($request) {
+    $input = $request-&gt;get_param(&#x27;input&#x27;);
+    $id = isset($input[&#x27;post_id&#x27;]) ? absint($input[&#x27;post_id&#x27;]) : 0;
+    return $id &gt; 0 &amp;&amp; current_user_can(&#x27;edit_post&#x27;, $id);
+},</code></pre></div><p>Es un fragmento de spec, no un registro completo. Declara <code>post_id</code> como integer requerido con mínimo 1 en el esquema de tu operación. Para un recurso diferente, utiliza su capacidad correspondiente y verifica propiedad/alcance según el caso.</p><ul><li>Validar tipos y rangos no sustituye el saneamiento de negocio: usa, por ejemplo, <code>sanitize_text_field</code> o <code>wp_kses_post</code> cuando corresponda.</li><li>No confíes en ocultar una herramienta ni en <code>readOnly</code> para autorizar acceso. REST debe denegar peticiones directas no autorizadas.</li><li>Para escrituras propias, implementa preparación, revisión y confirmación con estado de servidor. La API de extensiones no añade ese protocolo automáticamente.</li><li>Una revisión optimista no constituye por sí sola una transacción ni elimina todas las carreras. Evalúa atomicidad, reintentos e idempotencia del caso de uso.</li><li>Usa <code>textContent</code> para resultados de texto en la interfaz y valida URLs antes de convertirlas en enlaces.</li></ul><p class="source-note">Modelo WordPress: <a href="https://developer.wordpress.org/rest-api/extending-the-rest-api/adding-custom-endpoints/#permissions-callback">permission_callback y endpoints personalizados</a>. Las decisiones de permisos por objeto pertenecen a tu extensión.</p></section><section id="esquemas" aria-labelledby="esquemas-title"><p class="doc-section-number">08</p><h2 id="esquemas-title">Subconjunto de JSON Schema</h2><div class="table-scroll" tabindex="0" role="region" aria-label="JSON Schema admitido"><table><thead><tr><th scope="col">Tipo / clave</th><th scope="col">Admitido por el puente</th></tr></thead><tbody><tr><td><code>object</code></td><td>properties, required y additionalProperties:false; también para objetos anidados.</td></tr><tr><td><code>string</code></td><td>minLength, maxLength.</td></tr><tr><td><code>number</code> / <code>integer</code></td><td>minimum, maximum; integer impone valor entero.</td></tr><tr><td><code>boolean</code></td><td>Tipo boolean.</td></tr><tr><td><code>array</code></td><td>items, minItems, maxItems.</td></tr><tr><td>Comunes</td><td>type, description, enum.</td></tr></tbody></table></div><p>El puente rechaza keywords no compatibles, incluidas <code>pattern</code>, <code>format</code>, <code>$ref</code>, <code>oneOf</code>, <code>anyOf</code>, <code>allOf</code>, <code>default</code>, <code>$schema</code> y tipos nullable en arrays de tipos. Usa este subconjunto para descriptores destinados a <code>registerServerTool</code>.</p><p>El registro PHP comprueba el contrato raíz; la conversión del puente se realiza al registrar en el navegador. Que PHP acepte un esquema no garantiza que el puente lo pueda convertir. Para necesidades más amplias registra una herramienta JS con Zod convertible a JSON Schema y mantén validación equivalente en tu operación REST.</p><div class="code-sample"><div class="code-heading"><span>Schema compatible</span><span>JSON</span></div><pre><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;additionalProperties&quot;: false,
+  &quot;properties&quot;: {
+    &quot;query&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 200 },
+    &quot;type&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;enum&quot;: [&quot;post&quot;, &quot;page&quot;] },
+    &quot;category&quot;: { &quot;type&quot;: &quot;integer&quot;, &quot;minimum&quot;: 0 },
+    &quot;limit&quot;: { &quot;type&quot;: &quot;integer&quot;, &quot;minimum&quot;: 1, &quot;maximum&quot;: 12 }
+  },
+  &quot;required&quot;: [&quot;query&quot;, &quot;type&quot;, &quot;category&quot;, &quot;limit&quot;]
+}</code></pre></div></section><section id="bloques" aria-labelledby="bloques-title"><p class="doc-section-number">09</p><h2 id="bloques-title">Bloques, herramientas y flujos incluidos</h2><div class="table-scroll" tabindex="0" role="region" aria-label="Herramientas por instancia"><table><thead><tr><th scope="col">Instancia</th><th scope="col">Herramientas</th><th scope="col">Flujo</th></tr></thead><tbody><tr><td><code>search_N</code></td><td>state({}), prepare({query}), submit({revision})</td><td>prepare rellena y devuelve revisión. submit exige revisión válida, valida el formulario y programa requestSubmit a 300 ms.</td></tr><tr><td><code>filter_N</code></td><td>state({}), prepare({query,category}), apply({revision})</td><td>apply invoca filter_content y renderiza resultados dentro de esa instancia.</td></tr><tr><td>Puente de servidor</td><td><code>server_NAME</code></td><td>registerServerTool descubre schema, valida con Zod y ejecuta REST.</td></tr></tbody></table></div><p>N es un número asignado durante el montaje. Editar manualmente un campo invalida la preparación anterior. Los filtros cancelan búsquedas en curso cuando cambian sus campos. Después de una navegación completa, vuelve a descubrir las herramientas.</p><h3>Bloque fastwebmcp/content-filter</h3><p>Atributos: <code>label</code> (por defecto «Explorar contenido»), <code>type</code> (post o page, post por defecto) y <code>limit</code> (6 por defecto; PHP lo limita a 1–12). Solo consulta contenido publicado sin contraseña. En la UI de entradas, prepare permite categorías presentes en el select; en páginas exige category:0.</p><p>Sin JavaScript, GET usa <code>fwmcp_query</code> y <code>fwmcp_category</code>, compartidos por las instancias de la página. Con JavaScript, cada bloque conserva campos y resultados propios; con WebMCP ausente/desactivado, siguen disponibles los controles manuales.</p><h3>Un bloque personalizado</h3><p>El render PHP de un bloque dinámico puede llamar <code>fwmcp_enqueue_frontend()</code>, emitir una raíz con <code>data-fwmcp-component</code> y cargar su adaptador como un script clásico dependiente de <code>fwmcp-runtime</code>. Usa <code>viewScript</code> y su archivo de assets para el JavaScript frontend de tu bloque. Los módulos ESM pueden consumir la API global una vez disponible; no hay export ESM público del runtime en esta versión.</p><p class="source-note">Campos y carga de assets de bloques: <a href="https://developer.wordpress.org/block-editor/reference-guides/block-api/block-metadata/">referencia oficial de block.json</a>.</p><h3>Herramientas administrativas</h3><p>El editor, biblioteca de medios, panel FastWebMCP y pantallas de ajustes/gestión registran sus propias herramientas según contexto y capacidades. No existe un catálogo universal invariable para toda página. Consulta <a href="https://github.com/MauricioPerera/fastwebmcp-wordpress/blob/main/readme.txt">readme.txt</a> y los adaptadores <a href="https://github.com/MauricioPerera/fastwebmcp-wordpress/blob/main/editor.ts">editor.ts</a>, <a href="https://github.com/MauricioPerera/fastwebmcp-wordpress/blob/main/media-library.ts">media-library.ts</a> y <a href="https://github.com/MauricioPerera/fastwebmcp-wordpress/blob/main/admin-tools.ts">admin-tools.ts</a> para nombres y flujos concretos.</p></section><section id="errores" aria-labelledby="errores-title"><p class="doc-section-number">10</p><h2 id="errores-title">Eventos, diagnóstico y errores</h2><div class="code-sample"><div class="code-heading"><span>Disponibilidad y errores del executor</span><span>JavaScript</span></div><pre><code>const api = window.FastWebMCP;
+console.log({ version: api?.version, supported: api?.supported() });
+console.table(api?.components() ?? []);
+
+document.addEventListener(&#x27;fastwebmcp:error&#x27;, event =&gt; {
+  const { name, error } = event.detail;
+  console.error(&#x27;WebMCP executor:&#x27;, name, error);
+});</code></pre></div><p><code>fastwebmcp:ready</code> se emite en document con la API en detail. <code>fastwebmcp:error</code> informa errores capturados dentro del executor. La validación Zod anterior al executor y los fallos de registro no pasan por este evento: maneja también las Promises de registro y los errores que recibe el agente.</p><div class="table-scroll" tabindex="0" role="region" aria-label="Diagnóstico de integración"><table><thead><tr><th scope="col">Síntoma</th><th scope="col">Comprobar</th></tr></thead><tbody><tr><td>window.FastWebMCP no existe</td><td>Que el render/helper haya cargado fwmcp-runtime; orden/dependencias del script y errores de consola.</td></tr><tr><td>supported() devuelve false</td><td>Filtro frontend_enabled, presencia de document.modelContext y compatibilidad del navegador/agente.</td></tr><tr><td>Nombre inválido o duplicado</td><td>Prefijo final, longitud, nombres globales y conversión . / - a _ en puentes.</td></tr><tr><td>Operación no disponible para esta sesión</td><td>Registro PHP anterior a rest_api_init, sesión y capacidad del manifiesto.</td></tr><tr><td>Revisión desactualizada</td><td>Prepara de nuevo después de editar manualmente o navegar; no reutilices revisiones entre instancias.</td></tr><tr><td>Esquema JSON no compatible</td><td>Keywords fuera del subconjunto, additionalProperties o required inválidos.</td></tr><tr><td>REST deniega acceso</td><td>Nonce y cookies, capability y permission_callback; la visibilidad del descriptor no concede permiso.</td></tr><tr><td>Resultados manuales fallan detrás de caché</td><td>Rutas same-origin, nonce vigente y exclusión de respuestas autenticadas del caché.</td></tr></tbody></table></div><p>REST puede responder 400 por entradas inválidas, 401/403 por acceso o autenticación, y 404 por una operación inexistente. Tus callbacks pueden devolver otros estados mediante WP_Error/REST. <code>invokeServer</code> transforma errores HTTP en <code>Error(message)</code>; no conserva status/code como propiedades públicas del Error. Para diagnosticar esos datos usa la pestaña Network.</p><div class="code-sample"><div class="code-heading"><span>Filtros PHP de configuración</span><span>PHP</span></div><pre><code>// Desactivar únicamente el registro WebMCP del frontend:
+add_filter(&#x27;fwmcp_frontend_enabled&#x27;, &#x27;__return_false&#x27;);
+
+// Mostrar el panel de laboratorio opcional en el frontend:
+// El plugin exige además manage_options para mostrarlo/cargarlo.
+add_filter(&#x27;fwmcp_frontend_debug_panel&#x27;, &#x27;__return_true&#x27;);</code></pre></div></section><section id="desarrollo" aria-labelledby="desarrollo-title"><p class="doc-section-number">11</p><h2 id="desarrollo-title">Compilación, pruebas y distribución</h2><div class="code-sample"><div class="code-heading"><span>Clonar y construir</span><span>Shell</span></div><pre><code>git clone https://github.com/MauricioPerera/fastwebmcp-wordpress.git
+cd fastwebmcp-wordpress
+npm ci
+npm run typecheck
+npm run build
+npm test
+npm run package</code></pre></div><p>Desarrollo: Node.js 22+ y Python 3 para el empaquetado. PHP 8+ permite comprobar sintaxis localmente. Las dependencias están fijadas en package-lock.json: Zod 4.5.4, esbuild 0.28.2 y TypeScript 7.0.2. <code>vendor/fastwebmcp</code> incluye el subconjunto MIT de registro imperativo del SDK; no requiere un checkout adyacente.</p><ul><li><code>npm run build</code>: genera los siete bundles IIFE de assets/.</li><li><code>npm test</code>: prueba el runtime compilado en VM con un mock de document.modelContext; esquemas, duplicados, cancelación, retirada/remontaje, disposal y ausencia de WebMCP.</li><li><code>npm run package</code>: genera dist/fastwebmcp-wordpress.zip, con carpeta raíz fastwebmcp-wordpress, assets, bloques, fuentes y licencias.</li><li>CI comprueba tipos, compilación, pruebas, sincronización de bundles, sintaxis PHP y ZIP. Los datos y fixtures WordPress del laboratorio externo no se distribuyen.</li></ul><div class="doc-note"><strong>Qué demuestra cada prueba.</strong><p>La VM valida el contrato local del runtime, no la integración del navegador. La versión 0.6.0 se validó también con WebMCP real en un WordPress local: dos búsquedas, dos filtros, retirada/remontaje, extensión PHP, rechazos y uso manual; 27 comprobaciones REST nuevas y 105 de regresión en ese laboratorio.</p></div><p>Cuando cambies fuentes TypeScript, reconstruye assets y ejecuta pruebas antes de empaquetar. La instalación del ZIP compilado no requiere Node, Python ni descargar scripts remotos.</p></section><section id="limites" aria-labelledby="limites-title"><p class="doc-section-number">12</p><h2 id="limites-title">Límites y referencias</h2><ul><li>Runtime compartido: aproximadamente 429 KiB sin compresión; adaptadores frontend, 4.2 KiB; editor del filtro, menos de 1 KiB. No se ha optimizado aún el tamaño de Zod.</li><li>La navegación dinámica admite sustituir raíces completas, no incluye un router SPA ni garantiza compatibilidad con cualquier theme, CDN o plugin.</li><li>Los esquemas tienen el subconjunto indicado; el protocolo de preparación/revisión de una extensión debe implementarse expresamente.</li><li>El comportamiento está documentado para 0.6.0. Consulta la release y el código antes de asumir compatibilidad con versiones posteriores.</li></ul><div class="reference-links"><a href="https://github.com/MauricioPerera/fastwebmcp-wordpress/blob/main/FRONTEND.md">Contrato frontend en el repositorio ↗</a><a href="https://github.com/MauricioPerera/fastwebmcp-wordpress/releases/tag/v0.6.0">Release 0.6.0 y ZIP ↗</a><a href="https://github.com/MauricioPerera/fastwebmcp-wordpress/actions">Comprobaciones automatizadas ↗</a><a href="https://github.com/MauricioPerera/fastwebmcp-wordpress/issues">Reportar una incidencia ↗</a></div></section></main></div><footer class="footer wrap"><a class="brand" href="./"><span class="brand-symbol" aria-hidden="true">↗</span><span>FastWebMCP<small>para WordPress</small></span></a><p>Referencia 0.6.0 · Licencia MIT</p><div><a href="./">Inicio</a><a href="https://github.com/MauricioPerera/fastwebmcp-wordpress/blob/main/FRONTEND.md">API en GitHub</a><a href="https://github.com/MauricioPerera/fastwebmcp-wordpress/issues">Incidencias</a></div></footer><p id="copy-status" class="visually-hidden" role="status"></p></body></html>

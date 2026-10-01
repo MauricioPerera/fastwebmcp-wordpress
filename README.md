@@ -41,7 +41,8 @@ componentes, asigna IDs por instancia y retira herramientas cuando desaparece
 el componente. Para operaciones de servidor, la API PHP declara esquema,
 callback y comprobación de permisos.
 
-Consulta [FRONTEND.md](FRONTEND.md) para contratos, ejemplos completos,
+Consulta la [documentación técnica web](https://mauricioperera.github.io/fastwebmcp-wordpress/desarrolladores.html)
+y [FRONTEND.md](FRONTEND.md) para contratos, ejemplos completos,
 ciclo de vida, caché, autenticación y límites de los esquemas.
 [readme.txt](readme.txt) describe las herramientas administrativas.
 
