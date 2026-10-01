@@ -1,5 +1,7 @@
 # FastWebMCP for WordPress
 
+[Conoce el plugin e instala paso a paso](https://mauricioperera.github.io/fastwebmcp-wordpress/).
+
 Herramientas WebMCP para usar WordPress desde un agente en el navegador, con
 efectos visibles y permisos comprobados por WordPress. Versión **0.6.0**, MIT.
 
@@ -81,3 +83,9 @@ La navegación dinámica admite reemplazar raíces completas de componentes;
 no incluye un router SPA. El fallback GET de filtros comparte parámetros por
 página. Las capacidades y el saneamiento del servidor siguen siendo obligatorios
 en las extensiones. El plugin no está publicado en WordPress.org.
+
+## Landing page
+
+La página pública vive en `docs/` y se publica con GitHub Pages desde `main:/docs`.
+Es HTML, CSS y JavaScript estático, sin dependencias ni proceso de compilación.
+Incluye instalación, ejemplos interactivos, requisitos, integración y preguntas frecuentes.
