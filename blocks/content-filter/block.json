@@ -1,0 +1,16 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 3,
+  "name": "fastwebmcp/content-filter",
+  "title": "Filtros de contenido",
+  "category": "widgets",
+  "icon": "filter",
+  "description": "Buscador y filtros de contenido público, utilizables manualmente y mediante WebMCP.",
+  "attributes": {
+    "label": { "type": "string", "default": "Explorar contenido" },
+    "type": { "type": "string", "default": "post", "enum": ["post", "page"] },
+    "limit": { "type": "number", "default": 6 }
+  },
+  "editorScript": "fwmcp-filter-editor",
+  "supports": { "html": false }
+}

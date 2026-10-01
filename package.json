@@ -1,0 +1,21 @@
+{
+  "name": "fastwebmcp-wordpress",
+  "version": "0.6.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Extensible WebMCP tools for WordPress themes, blocks and administration.",
+  "scripts": {
+    "build": "esbuild tools.ts editor.ts media-library.ts admin-tools.ts runtime.ts frontend.ts filter-editor.ts --bundle --minify --format=iife --outdir=assets",
+    "typecheck": "tsc --noEmit",
+    "test": "node tests/runtime.mjs",
+    "package": "python scripts/package.py"
+  },
+  "dependencies": {
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  }
+}
